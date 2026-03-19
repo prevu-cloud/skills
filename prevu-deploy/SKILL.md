@@ -24,10 +24,26 @@ Or configure in your MCP client:
 
 ## Deployment Modes
 
-### Static Sites (React, Vue, Next.js, plain HTML)
+### Static Sites (React, Vue, Next.js, Hugo, plain HTML)
 
-1. **Build locally first**: `npm run build` (or equivalent)
-2. Deploy the **output directory** (e.g., `dist/`, `build/`, `out/`)
+**⚠️ Two-Phase Deploy (IMPORTANT):** Some static site generators (Hugo, Jekyll, etc.) bake the site URL into the HTML at build time (e.g., Hugo's `baseURL`). Since the preview subdomain is only known after creation, you **must** use a two-phase flow:
+
+1. **Phase 1 — Create preview first** (before building):
+   ```
+   create_preview(mode="static", name="my-site", ttl_seconds=3600)
+   # → returns subdomain, e.g. "abc123"
+   # → preview URL: https://abc123.prevu.page
+   ```
+
+2. **Phase 2 — Build with the actual URL, then upload:**
+   ```bash
+   # Hugo example:
+   hugo --minify -b "https://abc123.prevu.page/"
+   
+   # Then zip and upload the output directory
+   ```
+
+For frameworks that **don't** bake URLs into HTML (plain HTML, most React SPAs with relative paths), you can skip phase 1 and use the simple flow:
 
 ```
 create_preview(mode="static", path="./dist")
@@ -118,6 +134,20 @@ destroy_preview(id, token) → cleanup (also destroys provisioned dependencies)
 create_preview(mode="static", path="./public")
 ```
 
+### Hugo / Jekyll site (two-phase)
+```bash
+# 1. Create preview first to get the subdomain
+create_preview(mode="static", name="my-blog")
+# → returns subdomain "abc123", url "https://abc123.prevu.page"
+
+# 2. Build with actual URL
+hugo --minify -b "https://abc123.prevu.page/"
+
+# 3. Zip and upload
+cd public && zip -r /tmp/site.zip .
+# upload /tmp/site.zip to the preview
+```
+
 ### Flask + PostgreSQL API
 ```
 create_preview(
@@ -143,6 +173,14 @@ create_preview(
 ```
 
 ## Gotchas & Lessons Learned
+
+### Hugo/Jekyll: baseURL must match preview URL (two-phase deploy)
+Hugo, Jekyll, and similar SSGs bake the site URL into every HTML file at build time. If you build with a placeholder URL, all internal links and redirects will be broken. **You must use the two-phase flow:**
+1. `create_preview()` first → get the subdomain
+2. Build with the actual URL (e.g., `hugo -b "https://xxx.prevu.page/"`)
+3. Upload the built output
+
+This applies to any SSG that uses absolute URLs in output. React SPAs with relative paths (e.g., Vite with `base: './'`) don't have this issue.
 
 ### Next.js: Middleware blocks static export
 If the project uses `next-intl`, `next-auth`, or any other **middleware-based** feature, `output: 'export'` will fail. You **must** use `output: 'standalone'` and deploy as a **runtime** preview (not static).
