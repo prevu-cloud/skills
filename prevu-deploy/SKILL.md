@@ -142,6 +142,67 @@ create_preview(
 )
 ```
 
+## Gotchas & Lessons Learned
+
+### Next.js: Middleware blocks static export
+If the project uses `next-intl`, `next-auth`, or any other **middleware-based** feature, `output: 'export'` will fail. You **must** use `output: 'standalone'` and deploy as a **runtime** preview (not static).
+
+**Standalone deploy recipe:**
+```bash
+# 1. Add to next.config.ts/mjs:
+#    output: 'standalone'
+
+# 2. Build
+npm run build
+
+# 3. Assemble deploy directory (all 3 parts required!)
+mkdir -p /tmp/deploy
+cp -r .next/standalone/* /tmp/deploy/
+cp -r .next/static /tmp/deploy/.next/static
+cp -r public /tmp/deploy/public  # if exists
+
+# 4. Deploy as runtime
+create_preview(mode="runtime", runtime="node:22", path="/tmp/deploy",
+  start_command="node server.js", runtime_port=3000)
+```
+
+**Why standalone?** Regular `.next` is 300MB+; standalone is ~20-30MB (includes only needed node_modules).
+
+### Python: slim images have no wget/unzip
+`python:*-slim` images lack `wget`, `curl`, `unzip`. Prevu's init containers use Python's built-in `urllib` + `zipfile` instead. **You don't need to handle this** — just know that if you see init container errors about missing commands, it's expected behavior that's already handled.
+
+### Python: pip deps need PYTHONPATH
+Dependencies are installed to `/app/.pylibs` (not system site-packages). Prevu auto-injects `PYTHONPATH=/app/.pylibs` so your app finds them. **No action needed** — but if you manually set `PYTHONPATH` in env vars, make sure to include `/app/.pylibs`.
+
+### Go: must cross-compile
+The preview runs on Linux amd64. If you build on macOS or Windows:
+```bash
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o server .
+```
+Forgetting `CGO_ENABLED=0` can cause dynamic linking issues even on Linux.
+
+### Artifact size matters
+Large uploads (>100MB) are slow and may timeout. Always optimize:
+- Next.js: use `standalone` output (~20MB vs 300MB+)
+- Python: don't include `venv/` or `__pycache__/` in the zip
+- Node.js: don't include `node_modules/` — they're installed by the init container
+- Go: ship only the binary (single file, typically 10-20MB)
+
+### Fullstack: deploy order is critical
+1. Deploy **backend first** → get its `*.prevu.page` URL
+2. Build frontend with backend URL baked in (e.g., `NEXT_PUBLIC_API_URL=https://xxx.prevu.page`)
+3. Deploy frontend
+4. Backend must allow CORS from the frontend's `*.prevu.page` origin
+
+There is no service discovery between previews — you must pass URLs explicitly.
+
+### Healthcheck path must exist
+If you specify `healthcheck_path`, that endpoint must return HTTP 200. If your app has no health route, either:
+- Add one (`GET /health` → 200)
+- Or set `healthcheck_path="/"` if your root returns 200
+
+The pod won't become Ready until the healthcheck passes (Kubernetes readiness probe).
+
 ## Troubleshooting
 
 - **404 on root path**: Your app doesn't define a `/` route — this is app-level, not Prevu
@@ -149,6 +210,8 @@ create_preview(
 - **ModuleNotFoundError (Python)**: Ensure `requirements.txt` is in the deploy directory
 - **Binary won't execute (Go)**: Must cross-compile with `CGO_ENABLED=0 GOOS=linux GOARCH=amd64`
 - **Deploy timeout**: Check `get_preview_status` — init containers pulling images or installing deps can take 30-60s
+- **Pod stuck in Init**: Usually downloading artifacts or installing deps — wait 30-60s, then check status
+- **Next.js 307 redirect on `/`**: Normal if using `next-intl` — it redirects to `/{locale}`. Your app works fine.
 
 ## HTTP API Fallback
 
