@@ -115,17 +115,31 @@ Deploy as two separate previews:
 
 The backend must handle CORS if frontend and backend are on different subdomains.
 
-## Lifecycle
+## Lifecycle & Claiming
 
 ```
-create_preview(...)        → returns preview_id, url, token
+create_preview(...)        → returns preview_id, url, claim_url, token
 get_preview_status(id)     → check deployment progress
 destroy_preview(id, token) → cleanup (also destroys provisioned dependencies)
 ```
 
-- Previews auto-expire (default 1 hour, max 24 hours, set via `ttl_seconds`)
-- Each preview gets a unique `*.prevu.page` subdomain with TLS
-- A 6-character `claim_code` is returned for sharing
+### ⚠️ TTL & Claim URL (Critical)
+
+**Unclaimed previews expire in 10 minutes.** The `ttl_seconds` parameter only takes effect after claiming.
+
+When you create a preview, **always show the claim URL to the user**. This is the most important output.
+
+| State | TTL | Behavior |
+|-------|-----|----------|
+| Unclaimed | **10 minutes** | Preview auto-deletes if not claimed |
+| Claimed | Default 1h (max 24h via `ttl_seconds`) | User owns it, can extend TTL |
+
+**Flow:**
+1. `create_preview(...)` → preview starts with 10-min unclaimed TTL
+2. User opens `claim_url` → logs in with GitHub → TTL extends to full duration
+3. Preview appears in user's dashboard
+
+**Always tell the user:** "Open this link to claim your preview before it expires: {claim_url}"
 
 ## Common Patterns
 
