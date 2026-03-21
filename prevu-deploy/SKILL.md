@@ -66,9 +66,9 @@ create_preview(mode="runtime", runtime="go", path="./output", start_command="./s
 create_preview(mode="runtime", runtime="python:3.12", path="./src", start_command="python app.py", runtime_port=8080, healthcheck_path="/health")
 ```
 
-**Node.js**: Include `package.json`. Dependencies are auto-installed via `npm install --production`:
+**Node.js**: **Build locally first.** Upload only the build output (e.g., `.next/standalone`), NOT the full source tree. Do NOT include `node_modules/` — dependencies are auto-installed via `npm install` on the server. If `node_modules/` is included, platform-specific binaries may be incompatible (e.g., macOS → Linux):
 ```
-create_preview(mode="runtime", runtime="node:22", path="./src", start_command="node server.js", runtime_port=3000, healthcheck_path="/health")
+create_preview(mode="runtime", runtime="node:22", path="./deploy", start_command="node server.js", runtime_port=3000, healthcheck_path="/health")
 ```
 
 ### Docker Images
@@ -125,17 +125,17 @@ destroy_preview(id, token) → cleanup (also destroys provisioned dependencies)
 
 ### ⚠️ TTL & Claim URL (Critical)
 
-**Unclaimed previews expire in 10 minutes.** The `ttl_seconds` parameter only takes effect after claiming.
+**Unclaimed previews expire in 20 minutes.** The `ttl_seconds` parameter only takes effect after claiming.
 
 When you create a preview, **always show the claim URL to the user**. This is the most important output.
 
 | State | TTL | Behavior |
 |-------|-----|----------|
-| Unclaimed | **10 minutes** | Preview auto-deletes if not claimed |
+| Unclaimed | **20 minutes** | Preview auto-deletes if not claimed |
 | Claimed | Default 1h (max 24h via `ttl_seconds`) | User owns it, can extend TTL |
 
 **Flow:**
-1. `create_preview(...)` → preview starts with 10-min unclaimed TTL
+1. `create_preview(...)` → preview starts with 20-min unclaimed TTL
 2. User opens `claim_url` → logs in with GitHub → TTL extends to full duration
 3. Preview appears in user's dashboard
 
@@ -235,10 +235,10 @@ Forgetting `CGO_ENABLED=0` can cause dynamic linking issues even on Linux.
 
 ### Artifact size matters
 Large uploads (>100MB) are slow and may timeout. Always optimize:
-- Next.js: use `standalone` output (~20MB vs 300MB+)
-- Python: don't include `venv/` or `__pycache__/` in the zip
-- Node.js: don't include `node_modules/` — they're installed by the init container
-- Go: ship only the binary (single file, typically 10-20MB)
+- **Next.js: MUST use `standalone` output** (~20MB vs 300MB+). Include `.next/standalone/*` + `.next/static` + `public/`. See Next.js standalone recipe below.
+- **Python**: don't include `venv/` or `__pycache__/` in the zip
+- **Node.js: NEVER include `node_modules/`** — they are auto-installed by `npm install` on the server. Including them causes cross-platform binary incompatibility (e.g., `@swc/helpers` built on macOS won't work on Alpine Linux).
+- **Go**: ship only the binary (single file, typically 10-20MB)
 
 ### Fullstack: deploy order is critical
 1. Deploy **backend first** → get its `*.prevu.page` URL
@@ -257,6 +257,7 @@ The pod won't become Ready until the healthcheck passes (Kubernetes readiness pr
 
 ## Troubleshooting
 
+- **`MODULE_NOT_FOUND` / `@swc/helpers` error**: You uploaded `node_modules/` with the artifact. **Remove `node_modules/` from the zip** — the server runs `npm install` and needs platform-native binaries (Alpine Linux). macOS/Windows `node_modules` won't work.
 - **404 on root path**: Your app doesn't define a `/` route — this is app-level, not Prevu
 - **CORS errors**: Backend needs `Access-Control-Allow-Origin` headers for cross-subdomain requests
 - **ModuleNotFoundError (Python)**: Ensure `requirements.txt` is in the deploy directory
